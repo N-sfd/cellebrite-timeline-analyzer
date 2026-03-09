@@ -1,7 +1,17 @@
 from pathlib import Path
+import sys
+
+# Ensure project root is on path when run as script (e.g. streamlit run src/dashboard.py)
+_root = Path(__file__).resolve().parent.parent
+if str(_root) not in sys.path:
+    sys.path.insert(0, str(_root))
+
 import pandas as pd
 import streamlit as st
 import plotly.express as px
+
+from src.analysis.power_event_correlation import get_activity_around_power_events
+from src.analysis.suspicious_burst_detector import detect_suspicious_bursts, get_events_for_burst
 
 st.set_page_config(page_title="Cellebrite Timeline Analyzer", layout="wide")
 
@@ -96,6 +106,191 @@ if "event_time_utc" in filtered.columns and not filtered.empty:
         title="Interactive Event Timeline"
     )
     st.plotly_chart(fig_timeline, use_container_width=True)
+
+st.subheader("Power-Up Event Correlation")
+
+power_window = get_activity_around_power_events(
+    filtered,
+    minutes_before=5,
+    minutes_after=10
+)
+
+if power_window.empty:
+    st.info("No power/boot events found in the current filtered dataset.")
+else:
+    power_events_list = sorted(
+        power_window["power_event_time"].dropna().astype(str).unique().tolist()
+    )
+
+    selected_power_event = st.selectbox(
+        "Select a power event",
+        power_events_list
+    )
+
+    selected_window = power_window[
+        power_window["power_event_time"].astype(str) == selected_power_event
+    ].copy()
+
+    col1, col2, col3 = st.columns(3)
+    col1.metric("Events in Window", len(selected_window))
+    col2.metric(
+        "Likely User Events",
+        (selected_window["actor_hint"] == "likely_user").sum() if "actor_hint" in selected_window.columns else 0
+    )
+    col3.metric(
+        "Likely System/App Events",
+        (selected_window["actor_hint"] == "likely_system_or_app").sum() if "actor_hint" in selected_window.columns else 0
+    )
+
+    if "event_time_utc" in selected_window.columns:
+        chart_df = selected_window.copy()
+        chart_df["event_label"] = chart_df["action"].fillna("event") if "action" in chart_df.columns else "event"
+
+        fig_power = px.scatter(
+            chart_df,
+            x="event_time_utc",
+            y="event_label",
+            color="actor_hint" if "actor_hint" in chart_df.columns else None,
+            symbol="is_power_event",
+            hover_data=[c for c in ["source", "artifact_type", "details", "minutes_from_power_event"] if c in chart_df.columns],
+            title="Activity 5 Minutes Before and 10 Minutes After Power Event"
+        )
+        st.plotly_chart(fig_power, use_container_width=True)
+
+    st.markdown("### Correlated Event Table")
+    st.dataframe(
+        selected_window[
+            [c for c in [
+                "event_time_utc",
+                "minutes_from_power_event",
+                "action",
+                "actor_hint",
+                "artifact_type",
+                "details",
+                "source",
+                "is_power_event"
+            ] if c in selected_window.columns]
+        ],
+        use_container_width=True,
+        height=350
+    )
+
+st.subheader("Suspicious Burst Detector")
+
+burst_df = detect_suspicious_bursts(
+    filtered,
+    window_minutes=5,
+    min_events=4
+)
+
+if burst_df.empty:
+    st.info("No suspicious bursts detected in the current filtered dataset.")
+else:
+    st.markdown("### Detected Burst Windows")
+    burst_cols = [
+        "burst_start",
+        "burst_end",
+        "event_count",
+        "artifact_types",
+        "likely_user_events",
+        "likely_system_events",
+        "burst_score",
+        "risk_level"
+    ]
+    st.dataframe(
+        burst_df[[c for c in burst_cols if c in burst_df.columns]],
+        use_container_width=True,
+        height=220
+    )
+
+    risk_counts = burst_df["risk_level"].value_counts().reset_index()
+    risk_counts.columns = ["risk", "count"]
+    fig_risk = px.bar(
+        risk_counts,
+        x="risk",
+        y="count",
+        color="risk",
+        title="Suspicious Burst Risk Levels",
+        color_discrete_map={
+            "HIGH": "red",
+            "MEDIUM": "orange",
+            "LOW": "yellow",
+            "INFO": "green"
+        }
+    )
+    st.plotly_chart(fig_risk, use_container_width=True)
+
+    burst_options = [
+        f"{idx} | {row['burst_start']} -> {row['burst_end']} | events={row['event_count']} | score={row['burst_score']}"
+        for idx, row in burst_df.iterrows()
+    ]
+
+    selected_burst_label = st.selectbox("Select a suspicious burst", burst_options)
+    selected_index = int(selected_burst_label.split("|")[0].strip())
+    selected_burst = burst_df.iloc[selected_index]
+
+    burst_events = get_events_for_burst(filtered, selected_burst)
+
+    c1, c2, c3, c4 = st.columns(4)
+    c1.metric("Events in Burst", int(selected_burst["event_count"]))
+    c2.metric("Artifact Types", int(selected_burst["artifact_types"]))
+    c3.metric("Likely User", int(selected_burst["likely_user_events"]))
+    c4.metric("Likely System/App", int(selected_burst["likely_system_events"]))
+
+    if not burst_events.empty:
+        chart_df = burst_events.copy()
+        chart_df["event_label"] = (
+            chart_df["action"].fillna("event")
+            if "action" in chart_df.columns else "event"
+        )
+
+        fig_burst = px.scatter(
+            chart_df,
+            x="event_time_utc",
+            y="event_label",
+            color="actor_hint" if "actor_hint" in chart_df.columns else None,
+            size_max=10,
+            hover_data=[c for c in [
+                "source", "artifact_type", "details", "minutes_from_burst_start"
+            ] if c in chart_df.columns],
+            title="Suspicious Burst Activity Timeline"
+        )
+        st.plotly_chart(fig_burst, use_container_width=True)
+
+        st.markdown("### Events Inside Selected Burst")
+        st.dataframe(
+            burst_events[
+                [c for c in [
+                    "event_time_utc",
+                    "minutes_from_burst_start",
+                    "action",
+                    "actor_hint",
+                    "artifact_type",
+                    "details",
+                    "source"
+                ] if c in burst_events.columns]
+            ],
+            use_container_width=True,
+            height=320
+        )
+
+st.subheader("Investigation Summary")
+
+if burst_df.empty:
+    high, medium = 0, 0
+else:
+    high = (burst_df["risk_level"] == "HIGH").sum()
+    medium = (burst_df["risk_level"] == "MEDIUM").sum()
+
+st.write(f"High risk bursts detected: **{high}**")
+st.write(f"Medium risk bursts detected: **{medium}**")
+
+if high > 0:
+    st.error("⚠ High-risk activity bursts detected. Further investigation recommended.")
+elif medium > 0:
+    st.warning("Moderate suspicious activity detected.")
+else:
+    st.success("No significant suspicious bursts detected.")
 
 st.subheader("Filtered Events Table")
 st.dataframe(filtered, use_container_width=True, height=400)

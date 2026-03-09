@@ -34,6 +34,13 @@ def _normalize_columns(df: pd.DataFrame) -> pd.DataFrame:
 def _guess_action_from_row(row: dict) -> str:
     # Heuristic: look for keywords in known fields
     text = " ".join([str(v) for v in row.values() if v is not None]).lower()
+    # Power/boot events (for correlation panel)
+    for k in ["device_boot", "boot", "power_on", "powered on", "startup", "power on"]:
+        if k in text:
+            return "device_boot"
+    for k in ["device_shutdown", "shutdown", "powered off", "power off", "power_off"]:
+        if k in text:
+            return "device_shutdown"
     for k in ["deleted", "remove", "uninstall"]:
         if k in text: return "deleted"
     for k in ["created", "install", "added", "download"]:
@@ -42,6 +49,10 @@ def _guess_action_from_row(row: dict) -> str:
         if k in text: return "modified"
     for k in ["access", "open", "view", "read"]:
         if k in text: return "accessed"
+    # Preserve event_type from device_events.csv (e.g. screen_unlock, screen_lock)
+    event_type = row.get("event_type") or row.get("event type")
+    if event_type and isinstance(event_type, str) and str(event_type).strip():
+        return str(event_type).strip().lower()
     return "event"
 
 def _actor_hint(row: dict) -> str:
@@ -56,28 +67,65 @@ def _actor_hint(row: dict) -> str:
 
 def _events_from_csv(root: Path) -> list[pd.DataFrame]:
     frames = []
+
     for f in root.rglob("*.csv"):
         try:
             df = pd.read_csv(f, low_memory=False)
-        except Exception:
+        except Exception as e:
+            print(f"Skipping {f}: {e}")
+            continue
+
+        if df.empty:
             continue
 
         df = _normalize_columns(df)
+        print(f"Processing {f.name} with columns: {list(df.columns)}")
+
         ts_col = _pick_timestamp_column(df.columns)
         if not ts_col:
+            print(f"No timestamp column found in {f.name}")
             continue
 
         df["event_time_utc"] = df[ts_col].apply(parse_any_datetime)
         df = df.dropna(subset=["event_time_utc"])
 
-        # Build a compact event record while keeping traceability
+        if df.empty:
+            print(f"No valid timestamps in {f.name}")
+            continue
+
+        def make_details(row):
+            keep_cols = [c for c in df.columns if c not in ["event_time_utc"]]
+            parts = []
+            for c in keep_cols[:8]:
+                val = row.get(c)
+                if pd.notna(val):
+                    parts.append(f"{c}={val}")
+            return " | ".join(parts)[:800]
+
+        def make_action(row):
+            for key in ["event_type", "action", "call_type", "direction"]:
+                if key in row and pd.notna(row[key]):
+                    return str(row[key]).lower()
+            return "event"
+
+        def make_actor_hint(row):
+            row_text = " ".join([str(v).lower() for v in row.values if pd.notna(v)])
+            user_keys = ["outgoing", "message_sent", "photo_taken", "screen_unlock", "document_edit", "app_opened"]
+            system_keys = ["device_boot", "powered on", "background", "sync", "update", "play store"]
+
+            if any(k in row_text for k in user_keys):
+                return "likely_user"
+            if any(k in row_text for k in system_keys):
+                return "likely_system_or_app"
+            return "unknown"
+
         df_events = pd.DataFrame({
             "event_time_utc": df["event_time_utc"],
             "source": str(f.relative_to(root)),
-            "artifact_type": f.parent.name,
-            "action": df.apply(lambda r: _guess_action_from_row(r.to_dict()), axis=1),
-            "actor_hint": df.apply(lambda r: _actor_hint(r.to_dict()), axis=1),
-            "details": df.apply(lambda r: _compact_details(r.to_dict()), axis=1),
+            "artifact_type": f.stem,
+            "action": df.apply(make_action, axis=1),
+            "actor_hint": df.apply(make_actor_hint, axis=1),
+            "details": df.apply(make_details, axis=1),
         })
 
         frames.append(df_events)
