@@ -1,0 +1,4 @@
+timestamp,call_type,contact,phone,duration_seconds
+2026-03-01 09:10:11,outgoing,John,+1234567890,120
+2026-03-01 09:45:33,incoming,Alice,+1234567777,45
+2026-03-01 10:02:10,missed,Bob,+1234565555,0

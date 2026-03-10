@@ -1,0 +1,5 @@
+timestamp,event_type,details
+2026-03-01 08:05:00,device_boot,Phone powered on
+2026-03-01 08:06:12,screen_unlock,User unlocked device
+2026-03-01 12:45:22,screen_lock,Device locked
+2026-03-01 13:10:01,device_shutdown,Phone powered off

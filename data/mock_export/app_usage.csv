@@ -1,0 +1,6 @@
+timestamp,app_name,event_type,package_name
+2026-03-01 08:10:12,WhatsApp,app_opened,com.whatsapp
+2026-03-01 08:12:05,Camera,photo_taken,com.android.camera
+2026-03-01 08:15:00,Chrome,app_opened,com.android.chrome
+2026-03-01 08:20:55,Google Docs,document_edit,com.google.android.apps.docs
+2026-03-01 08:40:11,WhatsApp,message_sent,com.whatsapp

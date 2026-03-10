@@ -18,12 +18,24 @@ st.set_page_config(page_title="Cellebrite Timeline Analyzer", layout="wide")
 st.title("Cellebrite Timeline Analyzer")
 st.caption("Interactive forensic investigation dashboard")
 
-OUTPUTS = Path("outputs")
+OUTPUTS = _root / "outputs"
+DEFAULT_DATA = _root / "data" / "mock_export"
 timeline_path = OUTPUTS / "timeline_all.csv"
 
 if not timeline_path.exists():
-    st.error("timeline_all.csv not found in outputs/. Run the pipeline first.")
-    st.stop()
+    if DEFAULT_DATA.exists():
+        with st.spinner("Building timeline from default dataset (data/mock_export)..."):
+            OUTPUTS.mkdir(parents=True, exist_ok=True)
+            from src.pipeline.build_timeline import build_timeline
+            timeline = build_timeline(DEFAULT_DATA)
+            timeline.to_csv(timeline_path, index=False)
+        st.success("Timeline built. Loading dashboard.")
+    else:
+        st.error(
+            "timeline_all.csv not found in outputs/ and no default data at data/mock_export/. "
+            "Run the pipeline first: `python -m src.main run --input-dir data/mock_export --start \"2026-03-01 00:00\" --end \"2026-03-31 00:00\" --tz UTC`"
+        )
+        st.stop()
 
 df = pd.read_csv(timeline_path)
 

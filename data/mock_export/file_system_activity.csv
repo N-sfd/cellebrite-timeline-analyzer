@@ -1,0 +1,4 @@
+timestamp,event_type,path,details
+2026-03-01 08:12:04,created,/DCIM/IMG_20260301_081204.jpg,Photo created
+2026-03-01 08:45:30,modified,/Download/document.pdf,File modified
+2026-03-01 09:00:00,accessed,/Documents/notes.txt,File opened
