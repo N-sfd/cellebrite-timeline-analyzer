@@ -52,6 +52,16 @@ if not TIMELINE_PATH.exists():
 
 df = pd.read_csv(TIMELINE_PATH)
 
+# If pipeline produced an empty timeline but default data exists, build in-process
+if df.empty and (DEFAULT_DATA := _root / "data" / "mock_export").exists():
+    with st.spinner("Building timeline from default dataset..."):
+        from src.pipeline.build_timeline import build_timeline
+        OUTPUTS.mkdir(parents=True, exist_ok=True)
+        timeline = build_timeline(DEFAULT_DATA)
+        timeline.to_csv(TIMELINE_PATH, index=False)
+        df = pd.read_csv(TIMELINE_PATH)
+    st.success("Timeline built from data/mock_export.")
+
 if "event_time_utc" in df.columns:
     df["event_time_utc"] = pd.to_datetime(df["event_time_utc"], errors="coerce")
 
