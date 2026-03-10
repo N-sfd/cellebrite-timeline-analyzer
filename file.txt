@@ -1,0 +1,7 @@
+Built a Python-based digital forensics dashboard that 
+reconstructs device activity from exported mobile artifacts 
+such as app usage, file activity, messages, calls, and device events. 
+The system merges multiple evidence sources into a unified timeline, 
+classifies likely user vs system activity, correlates events around 
+boot/power-up windows, detects suspicious bursts of activity, and
+ presents results through an interactive investigation dashboard.

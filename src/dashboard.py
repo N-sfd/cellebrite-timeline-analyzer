@@ -1,4 +1,5 @@
 from pathlib import Path
+import subprocess
 import sys
 
 # Ensure project root is on path when run as script (e.g. streamlit run src/dashboard.py)
@@ -19,25 +20,37 @@ st.title("Cellebrite Timeline Analyzer")
 st.caption("Interactive forensic investigation dashboard")
 
 OUTPUTS = _root / "outputs"
-DEFAULT_DATA = _root / "data" / "mock_export"
-timeline_path = OUTPUTS / "timeline_all.csv"
+TIMELINE_PATH = OUTPUTS / "timeline_all.csv"
 
-if not timeline_path.exists():
-    if DEFAULT_DATA.exists():
-        with st.spinner("Building timeline from default dataset (data/mock_export)..."):
-            OUTPUTS.mkdir(parents=True, exist_ok=True)
-            from src.pipeline.build_timeline import build_timeline
-            timeline = build_timeline(DEFAULT_DATA)
-            timeline.to_csv(timeline_path, index=False)
-        st.success("Timeline built. Loading dashboard.")
-    else:
-        st.error(
-            "timeline_all.csv not found in outputs/ and no default data at data/mock_export/. "
-            "Run the pipeline first: `python -m src.main run --input-dir data/mock_export --start \"2026-03-01 00:00\" --end \"2026-03-31 00:00\" --tz UTC`"
+if not TIMELINE_PATH.exists():
+    OUTPUTS.mkdir(parents=True, exist_ok=True)
+    input_dir = "data/client_export_folder"
+    if not (_root / input_dir).exists():
+        input_dir = "data/mock_export"
+    with st.spinner("Running pipeline to build timeline..."):
+        subprocess.run(
+            [
+                sys.executable,
+                "-m",
+                "src.main",
+                "run",
+                "--input-dir",
+                input_dir,
+                "--start",
+                "2026-03-01 00:00",
+                "--end",
+                "2026-03-03 00:00",
+                "--tz",
+                "UTC",
+                "--out-dir",
+                "outputs",
+            ],
+            check=True,
+            cwd=str(_root),
         )
-        st.stop()
+    st.success("Timeline built. Loading dashboard.")
 
-df = pd.read_csv(timeline_path)
+df = pd.read_csv(TIMELINE_PATH)
 
 if "event_time_utc" in df.columns:
     df["event_time_utc"] = pd.to_datetime(df["event_time_utc"], errors="coerce")
